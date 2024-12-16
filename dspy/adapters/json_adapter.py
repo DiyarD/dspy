@@ -38,17 +38,33 @@ class JSONAdapter(Adapter):
 
         try:
             provider = lm.model.split("/", 1)[0] or "openai"
-            if "response_format" in litellm.get_supported_openai_params(model=lm.model, custom_llm_provider=provider):
+            format_param = None
+            if provider in ['ollama','ollama_chat']:
+                format_param = 'format'
+            else:
+                if 'response_format' in litellm.get_supported_openai_params(model=lm.model, custom_llm_provider=provider):
+                    format_param = 'response_format'
+
+            if format_param is not None:
+                schema = _get_structured_outputs_response_format(signature)
                 try:
-                    response_format = _get_structured_outputs_response_format(signature)
-                    outputs = lm(**inputs, **lm_kwargs, response_format=response_format)
+                    lm_kwargs[format_param] = schema.model_json_schema() if format_param == 'format' else schema
+                    outputs = lm(**inputs, **lm_kwargs )
                 except Exception:
                     _logger.debug(
                         "Failed to obtain response using signature-based structured outputs"
                         " response format: Falling back to default 'json_object' response format."
                         " Exception: {e}"
                     )
-                    outputs = lm(**inputs, **lm_kwargs, response_format={"type": "json_object"})
+                    if format_param in lm_kwargs:
+                        del lm_kwargs[format_param]
+                    
+                    try:    
+                        lm_kwargs['response_format']={"type": "json_object", "response_schema": schema.model_json_schema()}
+                    except:
+                        lm_kwargs['response_format']={"type": "json_object"}
+
+                    outputs = lm(**inputs, **lm_kwargs)
             else:
                 outputs = lm(**inputs, **lm_kwargs)
 
